@@ -1,0 +1,137 @@
+{
+  "skill_name": "python-backend-engineering",
+  "evals": [
+    {
+      "id": 1,
+      "category": "architecture-proportionality",
+      "prompt": "Design a small CRUD AWS Lambda that stores one resource in DynamoDB. Keep the architecture proportional to the problem and explain which abstractions you are deliberately not adding.",
+      "expected_behaviors": [
+        "Produces a minimal structure: handler.py, service.py or repository.py, tests/ — no domain/, application/, or infrastructure/ directories.",
+        "Explicitly states that entities, value objects, repositories, ports, and DDD layers are not warranted.",
+        "Loads configuration from environment variables at the handler/composition boundary, not inside the business logic.",
+        "Does not introduce a DI container.",
+        "Does not create empty directories."
+      ],
+      "failure_signals": [
+        "Creates domain/, application/, infrastructure/ directories for a simple CRUD Lambda.",
+        "Introduces an Entity or Repository without justification.",
+        "Calls os.getenv inside business logic instead of at the boundary.",
+        "Adds a DI container (Punq) to a single-Lambda project."
+      ]
+    },
+    {
+      "id": 2,
+      "category": "framework-leakage-detection",
+      "prompt": "Review this Python API design: the FastAPI request model is passed directly into a use case, the use case calls os.getenv and boto3, and an Order ORM model raises HTTPException when cancellation is invalid. Identify all boundary violations and propose a corrected design.",
+      "expected_behaviors": [
+        "Identifies that a FastAPI request model (Pydantic BaseModel) must not be passed into a use case.",
+        "Identifies that os.getenv in a use case is a configuration discovery violation.",
+        "Identifies that boto3 in a use case is an SDK leakage violation — must be behind a port.",
+        "Identifies that raising HTTPException from a domain object is an HTTP concern in the domain.",
+        "Proposes: use case accepts a plain dataclass Command; configuration is injected; boto3 is wrapped behind a Protocol port; domain raises a domain exception; entrypoint maps it to HTTPException."
+      ],
+      "failure_signals": [
+        "Accepts any of the four violations as acceptable.",
+        "Proposes moving boto3 to a helper function instead of behind a port.",
+        "Proposes catching HTTPException in the use case instead of moving it to the boundary.",
+        "Does not separate the Pydantic request model from the application command."
+      ]
+    },
+    {
+      "id": 3,
+      "category": "idempotency-and-resilience",
+      "prompt": "Implement a payment message consumer triggered by SQS. The consumer calls an external payment provider. Define the architecture, the key design decisions, and the tests.",
+      "expected_behaviors": [
+        "Explicitly assumes at-least-once delivery and designs for duplicate messages.",
+        "Wraps the payment provider behind a capability port (e.g. PaymentGateway Protocol).",
+        "Considers idempotency mechanism: idempotency key, deduplication record, or conditional write.",
+        "States that POST /payment must NOT be blindly retried due to duplicate side effects.",
+        "Covers timeout, error mapping, and DLQ in the design.",
+        "Defines tests for: happy path, duplicate event (idempotent), provider timeout, provider error, and DLQ routing.",
+        "Does not log sensitive payment data."
+      ],
+      "failure_signals": [
+        "Assumes exactly-once delivery without justification.",
+        "Calls the payment provider SDK directly from the use case without a port.",
+        "Adds blind retry on POST without considering duplicate charges.",
+        "Does not mention idempotency at all.",
+        "Does not cover DLQ or error mapping."
+      ]
+    },
+    {
+      "id": 4,
+      "category": "aggregate-boundaries",
+      "prompt": "A system must enforce: an Order cannot have items added after it is shipped, and the order total must always equal the sum of its items. Design the domain model. Should you use an Aggregate? Justify your answer.",
+      "expected_behaviors": [
+        "Identifies Order as the Aggregate Root because the invariant spans Order and OrderItem.",
+        "Places add_item and total logic on the Order entity, not in a service.",
+        "Raises a domain exception (not HTTPException) when the invariant is violated.",
+        "States that OrderItem should not have its own repository.",
+        "Justifies the aggregate by the transactional consistency requirement across Order and OrderItem."
+      ],
+      "failure_signals": [
+        "Creates a separate OrderItemRepository.",
+        "Puts the invariant check in the use case instead of the domain entity.",
+        "Raises HTTPException from the domain model.",
+        "Introduces an aggregate without stating the transactional consistency problem it solves.",
+        "Creates an OrderService to hold the invariant logic instead of the entity."
+      ]
+    },
+    {
+      "id": 5,
+      "category": "event-contract-testing",
+      "prompt": "A Lambda is triggered by an SQS queue. The messages are produced by an upstream service your team does not own. How do you prevent silent breaking changes to the event schema from reaching production?",
+      "expected_behaviors": [
+        "Defines a Pydantic model or JSON schema for the incoming event shape.",
+        "Commits a canonical event fixture (real sample from the upstream service) alongside the model.",
+        "Writes a contract test that parses the fixture through the model and asserts field values.",
+        "Writes a negative test that confirms structurally invalid events are rejected.",
+        "States that these tests should run in CI before deployment."
+      ],
+      "failure_signals": [
+        "Relies only on runtime errors in production to detect schema changes.",
+        "Does not commit a canonical fixture.",
+        "Only validates optional fields, missing required field coverage.",
+        "Mocks the SQS event body instead of using a real sample."
+      ]
+    },
+    {
+      "id": 6,
+      "category": "async-sync-decision",
+      "prompt": "You are building a Lambda function that receives an SQS event, reads one item from DynamoDB, applies a simple business rule, and writes the result back to DynamoDB. Should the handler and repository be async or sync? Justify.",
+      "expected_behaviors": [
+        "Recommends sync for this Lambda because there is no concurrency benefit within a single sequential invocation.",
+        "Notes that async adds cold-start overhead (event loop initialization) without benefit here.",
+        "Notes that boto3 is synchronous and adding aioboto3 for a sequential single-I/O flow is not justified.",
+        "States the consistency rule: do not mix async use case with sync port or vice versa.",
+        "Would only recommend async if the Lambda needed to fan out to multiple concurrent I/O operations."
+      ],
+      "failure_signals": [
+        "Recommends async simply because FastAPI or other async frameworks are familiar.",
+        "Mixes async use case with sync boto3 calls without addressing the impedance.",
+        "Does not mention the cold-start cost of event loop initialization.",
+        "Adds aioboto3 without justifying the concurrency need."
+      ]
+    },
+    {
+      "id": 7,
+      "category": "logging-observability",
+      "prompt": "Configure logging for a production AWS Lambda. The logs must be searchable in CloudWatch Logs Insights, include a correlation ID per invocation, and never leak the patient_id field that appears in the event payload.",
+      "expected_behaviors": [
+        "Uses JSON structured logging (not plaintext) because CloudWatch parses JSON natively.",
+        "Configures logging once at module level (cold-start), not inside the handler function.",
+        "Uses LoggerAdapter or ContextLogger to attach aws_request_id as correlation context.",
+        "Explicitly omits or masks patient_id before logging any event data.",
+        "Uses LOG_LEVEL environment variable for configurable log levels.",
+        "Does not use logging.setLogRecordFactory() for per-request context."
+      ],
+      "failure_signals": [
+        "Uses plaintext logging format for a Lambda/CloudWatch runtime.",
+        "Configures logging inside the handler function (runs on every invocation).",
+        "Logs the full event payload including patient_id.",
+        "Uses logging.setLogRecordFactory() in a concurrent context.",
+        "Hardcodes the log level instead of reading from environment."
+      ]
+    }
+  ]
+}
