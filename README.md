@@ -1,6 +1,6 @@
 # python-backend-engineering
 
-A Kiro agent skill that enforces clean architecture, domain-driven design principles, and AWS Lambda best practices for Python backends.
+An agent skill that enforces clean architecture, domain-driven design principles, and AWS Lambda best practices for Python backends.
 
 ## What it does
 
