@@ -2,11 +2,11 @@
 
 ## 1. Core Principles
 
-Logging is an **infrastructure concern** that must be configured centrally and consumed consistently across all layers.
+Logging is an **infrastructure concern** that MUST be configured centrally and consumed consistently across all layers.
 
 ### Key Rules
-1. Logging configuration must be centralized in `logging.conf` (text) or a JSON formatter for structured runtimes.
-2. Loggers must be obtained through `logging_resolver.py`, which loads the configuration.
+1. Logging configuration must be centralized in `logging.conf` for local/non-Lambda runtimes or `configure_json_logging` for Lambda/structured runtimes.
+2. Loggers must be obtained through the selected runtime's configured logger factory.
 3. Log entries must include class, method, timestamp, and line number when configured.
 4. Domain and Application layers must not know about logging implementation details.
 5. Sensitive information must never be logged.
@@ -16,7 +16,7 @@ Logging is an **infrastructure concern** that must be configured centrally and c
 
 The architecture standard requires that the domain layer has no infrastructure dependencies. Logging sits at the boundary of this rule: obtaining a logger via `get_logger(__name__)` is generally accepted as a pragmatic exception because the stdlib `logging` module is a language primitive, not a framework.
 
-However, **do not log from the domain** when:
+Direct domain logging is exceptional. Prefer boundary logging or domain events. **Do not log from the domain** when:
 - the log event is really an application-level observability concern (e.g., "use case started"), or
 - the log would couple domain behavior to a specific observability format.
 
@@ -24,7 +24,7 @@ However, **do not log from the domain** when:
 
 | Context | Preferred approach |
 |---|---|
-| Domain invariant violation | Raise a domain exception; let the application or exception handler log it. |
+| Domain invariant violation | Raise a domain exception; let the boundary exception handler log it. |
 | Meaningful state transition | Domain may log via `get_logger(__name__)` — this is acceptable. |
 | Use-case outcome | Log in the application layer, not the domain. |
 | Audit trail / event sourcing | Emit a domain event; infrastructure subscribes and records it. |
@@ -33,16 +33,16 @@ The goal is that the domain remains independently testable and free of framework
 
 ---
 
-## 2. logging_resolver.py
-
-> **Note:** This file was previously called `resolve_path.py`. It has been renamed to `logging_resolver.py` to accurately reflect its responsibility as a logger factory.
+## 2. Local logging resolver
 
 ### Implementation
 
 ```python
 # infrastructure/logging_resolver.py
+import configparser
 import logging
 import logging.config
+import os
 from pathlib import Path
 
 class LoggingResolver:
@@ -66,31 +66,30 @@ class LoggingResolver:
         return Path.cwd() / "logging.conf"
 
     def _load_config(self) -> None:
-        """Load logging configuration from file, falling back to basicConfig."""
+        """Load local logging configuration or configure an explicit fallback."""
         if self.config_path.exists():
             try:
                 logging.config.fileConfig(self.config_path, disable_existing_loggers=False)
-            except Exception as e:
-                print(f"Warning: Could not load logging config from {self.config_path}: {e}")
-                self._fallback()
+            except (OSError, ValueError, TypeError, configparser.Error) as error:
+                raise RuntimeError(
+                    f"Could not load logging config from {self.config_path}"
+                ) from error
         else:
             self._fallback()
 
     def _fallback(self) -> None:
+        level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+        level = getattr(logging, level_name, None)
+        if not isinstance(level, int):
+            raise ValueError(f"Unsupported LOG_LEVEL: {level_name}")
         logging.basicConfig(
-            level=logging.INFO,
+            level=level,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         )
 
 
-_resolver: LoggingResolver | None = None
-
-
 def get_logger(name: str) -> logging.Logger:
-    """Logger factory. Ensures configuration is loaded before returning a logger."""
-    global _resolver
-    if _resolver is None:
-        _resolver = LoggingResolver()
+    """Return a logger after runtime bootstrap has configured logging."""
     return logging.getLogger(name)
 
 
@@ -228,21 +227,25 @@ def configure_json_logging(level: str = "INFO") -> None:
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
-    root.setLevel(getattr(logging, level.upper(), logging.INFO))
+    normalized_level = level.upper()
+    numeric_level = getattr(logging, normalized_level, None)
+    if not isinstance(numeric_level, int):
+        raise ValueError(f"Unsupported log level: {level}")
+    root.setLevel(numeric_level)
 ```
 
 ### Lambda handler bootstrap
 
 ```python
 # entrypoints/lambdas/my_handler.py
+import logging
 import os
 from infrastructure.json_logging import configure_json_logging
-from infrastructure.logging_resolver import get_logger
 
 # Cold-start: configure once, reused on warm invocations
 configure_json_logging(level=os.getenv("LOG_LEVEL", "INFO"))
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def handler(event: dict, context) -> dict:
@@ -250,21 +253,21 @@ def handler(event: dict, context) -> dict:
     # ... delegate to use case
 ```
 
-### Environment-aware resolver
+### Runtime bootstrap
 
-When the code must run both locally and in Lambda, detect the runtime and apply the correct format:
+When code runs both locally and in Lambda, use one composition-root bootstrap that selects the runtime-specific setup:
 
 ```python
 # infrastructure/logging_resolver.py  (extended version)
 import os
 
 def setup_logging() -> None:
-    """Configure logging based on the current runtime environment."""
+    """Configure logging once based on the current runtime environment."""
     if os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
         from infrastructure.json_logging import configure_json_logging
         configure_json_logging(level=os.getenv("LOG_LEVEL", "INFO"))
     else:
-        # falls through to fileConfig / basicConfig path in LoggingResolver
+        # Local runtime uses logging.conf or the explicit LOG_LEVEL fallback.
         LoggingResolver()
 ```
 
@@ -274,9 +277,7 @@ Call `setup_logging()` once at the composition root or Lambda module scope.
 
 ## 5. LoggerAdapter — Thread-Safe Context Enrichment
 
-> **Replaces the previous `LogContext` pattern.**
->
-> `LogContext` used `logging.setLogRecordFactory()`, which is **process-global and not thread-safe**. In any async or multi-threaded runtime (FastAPI, Lambda with concurrency, Celery), two concurrent requests would overwrite each other's factory, producing incorrect log context. `LoggerAdapter` is the correct tool: it enriches only the logger instances it wraps, without touching global state.
+Use `LoggerAdapter` or `ContextLogger` for per-request context. Do not use `logging.setLogRecordFactory()` for request context.
 
 ### Usage
 
@@ -285,13 +286,16 @@ import logging
 from infrastructure.logging_resolver import get_logger
 
 
+from typing import Dict, Optional
+
+
 class ContextLogger:
     """
     Wraps a standard logger with per-instance extra context.
     Safe for concurrent use — does not modify global logging state.
     """
 
-    def __init__(self, name: str, extra: dict | None = None) -> None:
+    def __init__(self, name: str, extra: Optional[Dict] = None) -> None:
         base = get_logger(name)
         self._adapter = logging.LoggerAdapter(base, extra or {})
 
@@ -334,7 +338,7 @@ In JSON output this produces:
 
 ### Domain Layer
 
-Apply the pragmatic exception described in Section 1. Log meaningful state transitions only. Raise domain exceptions for invariant violations — let the application or exception handler log those.
+Prefer boundary logging or domain events. Direct domain logging is exceptional and limited to meaningful state transitions when those alternatives cannot provide equivalent diagnostic value. Raise domain exceptions for invariant violations — let the application or exception handler log those.
 
 ```python
 class Order:
@@ -373,14 +377,10 @@ class DynamoDBOrderRepository:
         self.table_name = table_name
         self._logger = get_logger("infrastructure.dynamodb")
 
-    async def get_by_id(self, order_id: str) -> Order | None:
+    async def get_by_id(self, order_id: str) -> Optional[Order]:
         self._logger.debug("Fetching order", extra={"order_id": order_id})
-        try:
-            # DynamoDB operations...
-            return result
-        except Exception:
-            self._logger.error("DynamoDB read failed", exc_info=True, extra={"order_id": order_id})
-            raise
+        # DynamoDB operations...
+        return result
 ```
 
 ### Entrypoint Layer
@@ -388,19 +388,13 @@ class DynamoDBOrderRepository:
 ```python
 @router.post("/orders")
 async def create_order(request: CreateOrderRequest):
-    logger = get_logger("entrypoints.api")
+    logger = logging.getLogger("entrypoints.api")
     logger.info("Order request received", extra={"customer_id": str(request.customer_id)})
 
-    try:
-        result = use_case.execute(command)
-        logger.info("Order created", extra={"order_id": str(result.order_id)})
-        return {"order_id": result.order_id}
-    except ValidationError as e:
-        logger.warning("Validation failed", extra={"detail": str(e)})
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception:
-        logger.error("Unexpected error", exc_info=True)
-        raise HTTPException(status_code=500)
+    # The configured boundary adapter delegates failures to ExceptionHandler.
+    result = use_case.execute(command)
+    logger.info("Order created", extra={"order_id": str(result.order_id)})
+    return {"order_id": result.order_id}
 ```
 
 ---
@@ -413,7 +407,7 @@ async def create_order(request: CreateOrderRequest):
 - Log meaningful business events and state changes.
 - Use appropriate levels: DEBUG, INFO, WARNING, ERROR, CRITICAL.
 - Include context (IDs, state, relevant data) as `extra` fields — especially in JSON mode.
-- Log exceptions with `exc_info=True`.
+- Log unknown exceptions with `exc_info=True`; expected known failures use contextual logging without a traceback by default. See `references/python-standard-exceptions.md`.
 - Guard expensive debug operations:
   ```python
   if logger.isEnabledFor(logging.DEBUG):
@@ -489,6 +483,6 @@ def test_use_case_logs_start():
 ### Quality
 - [ ] No sensitive information logged.
 - [ ] Appropriate log levels used.
-- [ ] Exceptions logged with `exc_info=True`.
+- [ ] Unknown exceptions are logged once with `exc_info=True`; known expected failures are not redundantly logged.
 - [ ] Performance impact considered (guard clauses on DEBUG).
 - [ ] Logs are useful for debugging and production incident investigation.

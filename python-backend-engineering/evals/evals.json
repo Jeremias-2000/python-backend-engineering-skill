@@ -6,7 +6,7 @@
       "category": "architecture-proportionality",
       "prompt": "Design a small CRUD AWS Lambda that stores one resource in DynamoDB. Keep the architecture proportional to the problem and explain which abstractions you are deliberately not adding.",
       "expected_behaviors": [
-        "Produces a minimal structure: handler.py, service.py or repository.py, tests/ — no domain/, application/, or infrastructure/ directories.",
+        "Produces a minimal structure: handler.py, service.py or repository.py, app/tests/ — no domain/, application/, or infrastructure/ directories.",
         "Explicitly states that entities, value objects, repositories, ports, and DDD layers are not warranted.",
         "Loads configuration from environment variables at the handler/composition boundary, not inside the business logic.",
         "Does not introduce a DI container.",
@@ -92,7 +92,7 @@
         "Relies only on runtime errors in production to detect schema changes.",
         "Does not commit a canonical fixture.",
         "Only validates optional fields, missing required field coverage.",
-        "Mocks the SQS event body instead of using a real sample."
+        "Presents a hand-authored mock as a canonical upstream sample instead of clearly labeling fixture provenance."
       ]
     },
     {
@@ -131,6 +131,138 @@
         "Logs the full event payload including patient_id.",
         "Uses logging.setLogRecordFactory() in a concurrent context.",
         "Hardcodes the log level instead of reading from environment."
+      ]
+    },
+    {
+      "id": 8,
+      "category": "exception-handling",
+      "prompt": "Design exception handling for a Python backend with domain, application, validation, infrastructure, timeout, HTTP, Lambda, and queue boundaries. Use the Skill's canonical handler convention.",
+      "expected_behaviors": [
+        "Uses `from exceptions.exception_handler import ExceptionHandler` by default or explicitly justifies an existing project/framework deviation.",
+        "Keeps domain and application exceptions independent from HTTP, Lambda, queue, and framework response types.",
+        "Separates internal categories from stable public `ErrorCode` Enum values and does not use HTTP status codes as enum values.",
+        "Uses named domain exceptions instead of `ValueError` for domain-rule violations.",
+        "Returns a transport-neutral result containing error_code, safe_message, optional http_status, optional correlation_id, retryable, and internal logging context.",
+        "Uses a minimal safe public envelope with code, message, and correlation_id when available.",
+        "Maps the most-specific exception before base-class mappings and uses a generic internal-error fallback for unknown exceptions.",
+        "Uses 500 as the only default HTTP status for unexpected failures in new projects and leaves other mappings project-defined.",
+        "Lets transport adapters decide retry, acknowledgement, reprocessing, and DLQ behavior.",
+        "Logs unknown exceptions once with traceback context and logs expected known failures contextually without duplicate traceback logs.",
+        "Propagates correlation IDs when available and preserves wrapped causes with `raise ... from error`.",
+        "Preserves established API and transport contracts in existing projects."
+      ],
+      "failure_signals": [
+        "Raises HTTPException from domain or application code.",
+        "Uses ValueError as the stable domain-rule exception contract.",
+        "Returns exception text or stack traces to clients.",
+        "Uses HTTP status codes as ErrorCode enum values.",
+        "Imposes the HTTP envelope on Lambda or queue behavior.",
+        "Centralizes retry or DLQ policy in a universal HTTP-oriented handler.",
+        "Logs the same exception redundantly at every layer.",
+        "Drops the original cause when wrapping an exception."
+      ]
+    },
+    {
+      "id": 9,
+      "category": "skill-guidance-consistency",
+      "prompt": "Use the Python backend Skill for a Python 3.8 project that already has unittest, black, and a custom validation script. The project is a small CRUD API with no meaningful domain invariants.",
+      "expected_behaviors": [
+        "Uses typing-compatible annotations or explicitly gates syntax newer than Python 3.8.",
+        "Preserves unittest, black, and the custom validation script instead of replacing them with pytest, ruff, or mypy solely because they are recommended.",
+        "Keeps the CRUD architecture minimal and does not add DDD layers, speculative abstractions, or a DI container.",
+        "Uses the Skill's terminology without creating duplicate controller, adapter, entrypoint, or handler components for one boundary."
+      ],
+      "failure_signals": [
+        "Uses list[...] or X | None in a Python 3.8 normative example without a version gate.",
+        "Replaces existing project tooling with Skill defaults without a concrete need.",
+        "Creates repositories, aggregates, ports, or layers without a boundary problem.",
+        "Creates separate controller and adapter classes with identical responsibilities."
+      ]
+    },
+    {
+      "id": 10,
+      "category": "exception-result-ownership",
+      "prompt": "Design a shared exception result used by HTTP and SQS adapters. The result includes error_code, safe_message, http_status, correlation_id, retryable, and internal_log_context.",
+      "expected_behaviors": [
+        "Treats error_code and safe_message as public candidates.",
+        "Keeps http_status owned by the HTTP adapter.",
+        "Propagates correlation_id only when available.",
+        "Uses retryable as adapter metadata rather than a universal retry decision.",
+        "Keeps internal_log_context internal and excludes it from serialized responses.",
+        "Lets the SQS adapter decide acknowledgement, retry, and DLQ behavior."
+      ],
+      "failure_signals": [
+        "Serializes internal_log_context.",
+        "Makes the central handler decide all retry or DLQ behavior.",
+        "Requires HTTP status for SQS output.",
+        "Generates a universal correlation-ID mechanism without runtime justification."
+      ]
+    },
+    {
+      "id": 11,
+      "category": "normative-language-and-logging",
+      "prompt": "Review Skill references that discuss exception mapping, application logging, domain logging, and tooling recommendations. Identify which statements are mandatory, recommended, or project-defined.",
+      "expected_behaviors": [
+        "Treats MUST/SHALL as mandatory boundaries, SHOULD/RECOMMENDED as defaults, and MAY as project-defined choices.",
+        "Uses python-standard-exceptions.md as the detailed authority for exception mapping and result ownership.",
+        "Allows application layers to add logging only when they provide diagnostic context unavailable at the final boundary.",
+        "Logs unknown failures once with traceback context and avoids redundant logs for expected failures.",
+        "Treats direct domain logging as exceptional and prefers boundary logging or domain events.",
+        "Does not interpret optional tooling recommendations as mandatory for every project."
+      ],
+      "failure_signals": [
+        "Reports conflicting detailed exception mappings from multiple references.",
+        "Requires direct logging from domain entities.",
+        "Logs every expected exception with a duplicate traceback.",
+        "Installs or replaces tools solely because they are recommended.",
+        "Treats every sentence containing 'should' as a hard requirement."
+      ]
+    },
+    {
+      "id": 12,
+      "category": "copy-safe-examples",
+      "prompt": "Use the refactoring reference to introduce a repository abstraction in a Python 3.8 backend. The reference snippet omits some surrounding project definitions.",
+      "expected_behaviors": [
+        "Keeps the example compatible with Python 3.8+.",
+        "Makes required imports, symbols, constructor dependencies, and return behavior explicit.",
+        "Labels intentionally omitted setup as illustrative instead of presenting undefined symbols as a complete implementation.",
+        "Does not add Punq unless the project already uses it or the object graph justifies adoption."
+      ],
+      "failure_signals": [
+        "Copies undefined symbols as if they were complete implementation.",
+        "Uses Python 3.10-only syntax without a version gate.",
+        "Introduces a DI container solely because the example mentions dependency injection."
+      ]
+    },
+    {
+      "id": 13,
+      "category": "domain-logging-policy",
+      "prompt": "Review logging for a domain invariant failure and a meaningful domain state transition. The application boundary already logs failures with correlation context.",
+      "expected_behaviors": [
+        "Raises a named domain exception for the invariant failure.",
+        "Keeps final-boundary logging as the default owner and avoids duplicate logs.",
+        "Allows direct domain logging only for a meaningful state transition when boundary logging or a domain event cannot provide equivalent value.",
+        "Keeps domain logging free from framework-specific observability dependencies."
+      ],
+      "failure_signals": [
+        "Logs invariant failures in the domain and again at the boundary.",
+        "Requires every domain method to log directly.",
+        "Bans all meaningful state-transition logging without considering diagnostic value."
+      ]
+    },
+    {
+      "id": 14,
+      "category": "normative-example-interpretation",
+      "prompt": "A new project has no lint or test runner and reads a Skill reference that calls Pytest and Ruff preferred tools. Decide whether to install them while following an unrelated small CRUD task.",
+      "expected_behaviors": [
+        "Treats Pytest and Ruff as recommendations for new projects, not unconditional requirements.",
+        "Chooses tooling according to project scope and explicit task or policy.",
+        "Does not create DDD layers or speculative abstractions for the CRUD task."
+      ],
+      "failure_signals": [
+        "Installs all preferred tools automatically.",
+        "Treats every recommendation as a mandatory requirement.",
+        "Adds architecture unrelated to the task."
       ]
     }
   ]
