@@ -8,9 +8,17 @@ metadata:
 license: MIT
 ---
 
-# Python Backend Engineering
+# Python Backend Engineering Skill
+
+This package is a reusable Skill that guides an executing agent. It is not an autonomous Agent implementation.
+
+Normative language: `MUST`/`SHALL` marks mandatory boundaries; `SHOULD`/`RECOMMENDED` marks defaults; `MAY` marks project-defined choices.
 
 Use the smallest architecture that preserves business boundaries, testability, maintainability, and dependency direction. Let the problem determine the patterns: `Simple -> Modular -> Layered -> Hexagonal -> DDD`.
+
+When refactoring an existing Python backend, load `references/python-standard-refactoring.md`. For new projects, target `app/` and `app/tests/`; preserve coherent existing layouts such as top-level `tests/` unless migration has a concrete benefit.
+
+Active files in this package are normative. Files under `openspec/changes/archive/` are historical planning artifacts, not executable guidance.
 
 ## Workflow
 
@@ -27,6 +35,8 @@ Use the smallest architecture that preserves business boundaries, testability, m
    - Frameworks, ports, persistence, configuration, integrations, async/sync, and Lambda: `references/python-standard-infrastructure.md`
    - Testing, quality, dependency injection, contract tests, and review checklist: `references/python-standard-quality.md`
    - Logging configuration and layer-specific observability: `references/python-standard-logging.md`
+   - Exception classification, boundary mapping, safe envelopes, transport adapters, and exception logging: `references/python-standard-exceptions.md`
+   - Existing-backend refactoring, compatibility, class abstractions, constructor injection, Punq, and verification: `references/python-standard-refactoring.md`
 8. Implement the smallest coherent change. Every new abstraction must have a stated problem, owner, protected boundary, and testability or maintainability benefit.
 9. Verify behavior at the relevant boundary: domain unit tests, application tests with focused fakes or stubs, infrastructure integration tests where behavior depends on a real service, and API/Lambda tests for mapping, errors, retries, and idempotency.
 10. Finish with the architecture review checklist in the quality reference and report any unresolved tradeoffs or test gaps.
@@ -36,6 +46,7 @@ Use the smallest architecture that preserves business boundaries, testability, m
 - Keep framework, ORM, AWS SDK, transport DTO, and HTTP exception types out of domain code.
 - Keep environment and secret discovery out of business code; load validated configuration at the infrastructure/composition boundary and inject it explicitly.
 - Keep entrypoints thin: receive, parse and validate, map, invoke, map the result, and handle the external response.
+- Use `ExceptionHandler` from `exceptions.exception_handler` at the final boundary. Deviations require an existing project convention or framework constraint and explicit justification; keep mappings and responses out of domain/application code.
 - Keep transactions at the application/use-case boundary; infrastructure supplies the mechanism.
 - Treat message delivery as at-least-once unless exactly-once behavior is explicitly guaranteed. Design consumers for idempotency.
 - Consider timeout, retry safety, error mapping, logging, observability, and idempotency for every external integration.
@@ -53,6 +64,15 @@ Before adding an entity, value object, domain service, event, repository, gatewa
 - What complexity does it add?
 
 If the answers are unclear, do not add the abstraction.
+
+Use `ABC` and `abstractmethod` for nominal class contracts. Use `Protocol` for structural ports when duck typing is sufficient. Neither is required universally; follow the relevant reference.
+
+## Boundary Terminology
+
+- **Entrypoint**: outer boundary receiving external input and returning or acknowledging output.
+- **Adapter**: translator between a transport/runtime and application or handler results.
+- **Controller**: HTTP-oriented adapter when the framework uses that term; do not create a separate adapter without a concrete responsibility.
+- **Handler**: runtime entrypoint or exception-mapping component; qualify the term when both meanings exist.
 
 ## Completion Criteria
 

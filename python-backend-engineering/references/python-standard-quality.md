@@ -115,31 +115,37 @@ class SQSOrderPlacedEvent(BaseModel):
         return cls.model_validate(body)
 ```
 
+The following versioned file is a real sample from the upstream service. Hand-authored payloads must be labeled as mocks.
+
+```json
+{
+  "order_id": "550e8400-e29b-41d4-a716-446655440000",
+  "customer_id": "123e4567-e89b-12d3-a456-426614174000",
+  "placed_at": "2026-08-26T10:00:00Z",
+  "total_amount": 99.99
+}
+```
+
 ```python
 # tests/contracts/test_sqs_order_event_contract.py
 import json
+from pathlib import Path
+
 import pytest
 from infrastructure.events.sqs_order_event import SQSOrderPlacedEvent
 
-# Fixture represents the canonical shape produced by the upstream service.
-# Commit this fixture alongside the model — it IS the contract.
-VALID_SQS_RECORD = {
-    "body": json.dumps({
-        "order_id": "550e8400-e29b-41d4-a716-446655440000",
-        "customer_id": "123e4567-e89b-12d3-a456-426614174000",
-        "placed_at": "2026-08-26T10:00:00Z",
-        "total_amount": 99.99,
-    })
-}
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "order_placed.json"
 
 def test_valid_event_parses_correctly():
-    event = SQSOrderPlacedEvent.from_sqs_record(VALID_SQS_RECORD)
+    payload = json.loads(FIXTURE_PATH.read_text())
+    record = {"body": json.dumps(payload)}
+    event = SQSOrderPlacedEvent.from_sqs_record(record)
     assert str(event.order_id) == "550e8400-e29b-41d4-a716-446655440000"
     assert event.total_amount == 99.99
 
 def test_missing_required_field_raises_validation_error():
     record = {"body": json.dumps({"order_id": "550e8400-e29b-41d4-a716-446655440000"})}
-    with pytest.raises(Exception):  # ValidationError
+    with pytest.raises(ValueError):  # structural parsing failure, not a domain-rule error
         SQSOrderPlacedEvent.from_sqs_record(record)
 ```
 
@@ -161,31 +167,24 @@ def test_eventbridge_event_matches_schema(sample_eventbridge_event):
 
 **Checklist for event contract tests:**
 - [ ] A Pydantic model or JSON schema exists for each consumed event shape.
-- [ ] A canonical fixture (real sample event) is committed alongside the model.
+- [ ] A canonical, versioned real sample is committed and linked to the contract model.
 - [ ] Tests verify both valid parsing and rejection of structurally invalid events.
 - [ ] When the upstream producer changes the schema, these tests fail fast before deployment.
 
 ---
 
-## 3. Mandatory Engineering Standards
+## 3. Engineering Standards
 
-Every project **must** have:
-- Python type hints where practical
-- Pytest
-- automated tests for important behavior
-- dependency management
-- linting
-- formatting
-- clear configuration management
+Projects MUST preserve important behavior with appropriate tests, explicit configuration, and dependency management when dependencies exist. Type hints, linting, and formatting are RECOMMENDED for new projects and SHOULD follow existing project tooling. Scripts, prototypes, and disposable code MAY omit optional tooling when that scope is explicit.
 
-Preferred tools:
+Preferred tools for new projects:
 ```text
 pytest
 ruff
 mypy / pyright
 ```
 
-Use existing project tooling when present. Do not introduce a new tool without justification.
+Use existing project tooling when present. Do not introduce a replacement or install a new tool solely because this Skill recommends it. Pytest, Ruff, and mypy/pyright are RECOMMENDED defaults for new projects.
 
 ---
 

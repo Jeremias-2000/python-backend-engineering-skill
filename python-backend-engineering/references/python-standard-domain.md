@@ -14,11 +14,14 @@ Use an Entity when the concept:
 - owns meaningful business behavior
 
 ```python
+from typing import List
+
+
 @dataclass
 class Order:
     id: str
     status: OrderStatus
-    items: list[OrderItem]
+    items: List[OrderItem]
 
     def cancel(self) -> None:
         if self.status == OrderStatus.SHIPPED:
@@ -63,7 +66,7 @@ An Order and its OrderItems must be consistent:
 class Order:               # ← Aggregate Root
     id: str
     status: OrderStatus
-    items: list[OrderItem] # ← child entity, owned by Order
+    items: List[OrderItem] # ← child entity, owned by Order
 
     def add_item(self, item: OrderItem) -> None:
         if self.status != OrderStatus.DRAFT:
@@ -81,7 +84,7 @@ class Order:               # ← Aggregate Root
 |---|---|
 | Only the root has a repository. | Persistence is always through the root — never load a child directly. |
 | External objects hold only the root's identity. | References to child entities by other aggregates use IDs, not object references. |
-| One aggregate = one transaction. | Changing two aggregates in a single transaction is a design smell — use eventual consistency or reconsider boundaries. |
+| One aggregate = one transaction. | Treat this as a consistency guideline; changing multiple aggregates in one transaction requires explicit justification. |
 | Keep aggregates small. | Large aggregates cause contention. If you need to lock the whole thing to change a small part, the boundary is wrong. |
 
 ### When NOT to use an Aggregate
@@ -113,6 +116,10 @@ PhoneNumber
 ```
 
 ```python
+class InvalidMoneyAmount(Exception):
+    """Raised when a monetary amount violates the domain invariant."""
+
+
 @dataclass(frozen=True)
 class Money:
     amount: Decimal
@@ -120,7 +127,7 @@ class Money:
 
     def __post_init__(self) -> None:
         if self.amount < 0:
-            raise ValueError("Amount cannot be negative")
+            raise InvalidMoneyAmount()
 
     def add(self, other: "Money") -> "Money":
         if self.currency != other.currency:
@@ -188,7 +195,7 @@ These belong **at the boundary**:
 ```python
 class CreateOrderRequest(BaseModel):
     customer_id: UUID
-    items: list[OrderItemRequest]
+    items: List[OrderItemRequest]
 ```
 
 ### Business Invariants
@@ -267,7 +274,7 @@ Do not create events for every method call. An event represents something that *
 class OrderCancelled:
     order_id: str
     cancelled_at: datetime
-    reason: str | None = None
+    reason: Optional[str] = None
 ```
 
 ### Domain Event vs Integration Event
@@ -295,7 +302,7 @@ class PaymentAlreadyCaptured(Exception):
     """Raised when capture is attempted on an already-captured payment."""
 ```
 
-These must **not** reference HTTP status codes, framework types, or infrastructure concerns.
+These must **not** reference HTTP status codes, framework types, or infrastructure concerns. Use named exceptions for domain-rule violations rather than `ValueError`, so boundary mappings remain deliberate and stable.
 
 ### Exception propagation flow
 
@@ -304,7 +311,7 @@ Domain raises exception
         ↓
 Application catches it (optional — for wrapping or logging)
         ↓
-Global exception handler maps it to the external response
+`ExceptionHandler` at the boundary maps it to the external response
         ↓
 HTTP response / Lambda error envelope / DLQ message
 ```

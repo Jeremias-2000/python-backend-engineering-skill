@@ -46,14 +46,15 @@ Prefer one class per use case with a single `execute` method (or `async def exec
 ```python
 # application/use_cases/cancel_order.py
 from dataclasses import dataclass
+from typing import List, Optional
 from domain.orders.entities import Order
-from domain.orders.exceptions import OrderCannotBeCancelled
+from domain.orders.exceptions import OrderCannotBeCancelled, OrderNotFound
 from application.orders.ports import OrderRepository
 
 @dataclass
 class CancelOrderCommand:
     order_id: str
-    reason: str | None = None
+    reason: Optional[str] = None
 
 @dataclass
 class CancelOrderResult:
@@ -75,6 +76,8 @@ class CancelOrderUseCase:
         return CancelOrderResult(order_id=order.id, status=order.status.value)
 ```
 
+This is a focused example. `Order`, `OrderStatus`, `OrderNotFound`, and `OrderRepository` are project-owned symbols shown here to make the boundary explicit.
+
 **Keep use cases independently callable** — no framework type should appear in the signature. A use case must be testable with plain Python, no FastAPI, no Lambda event object, no HTTP request.
 
 ---
@@ -93,7 +96,7 @@ Use the Command / Query distinction when it reduces ambiguity.
 @dataclass
 class PlaceOrderCommand:
     customer_id: str
-    items: list[OrderItemCommand]
+    items: List[OrderItemCommand]
 
 # Query — reads
 @dataclass
@@ -207,6 +210,8 @@ class EventPublisher(Protocol):
     def publish(self, event_type: str, payload: dict) -> None: ...
 ```
 
+The protocol snippet is illustrative; the concrete event and payload types remain project-defined.
+
 ```python
 # application/use_cases/place_order.py
 class PlaceOrderUseCase:
@@ -243,9 +248,10 @@ The infrastructure adapter (`SQSEventPublisher`, `SNSEventPublisher`, etc.) hand
 
 The application layer may catch domain exceptions for two reasons:
 1. To wrap them in an application-level exception with richer context.
-2. To log the failure before re-raising.
+2. To add contextual logging before re-raising when it provides diagnostic value.
 
 It must **not** map exceptions to HTTP status codes or transport-level error shapes — that is the entrypoint's responsibility.
+Use `ExceptionHandler` from `exceptions.exception_handler` at the final boundary. Expected failures MUST NOT be logged again there when the application already added equivalent context.
 
 ```python
 # Application layer — acceptable

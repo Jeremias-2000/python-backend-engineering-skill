@@ -1,6 +1,6 @@
 # python-backend-engineering
 
-An agent skill that enforces clean architecture, domain-driven design principles, and AWS Lambda best practices for Python backends.
+A reusable Skill that guides an executing agent on clean architecture, domain-driven design principles, refactoring, and AWS Lambda best practices for Python backends.
 
 ## What it does
 
@@ -32,7 +32,7 @@ npx skills add https://github.com/Jeremias-2000/python-backend-engineering-skill
 Or install directly from a local path:
 
 ```bash
-npx skills add ./python-backend-engineering-skill
+npx skills add ./python-backend-engineering
 ```
 
 ## Skill structure
@@ -48,10 +48,14 @@ python-backend-engineering/
     ├── python-standard-application.md
     ├── python-standard-infrastructure.md
     ├── python-standard-logging.md
-    └── python-standard-quality.md
+    ├── python-standard-quality.md
+    ├── python-standard-exceptions.md
+    └── python-standard-refactoring.md
 ```
 
-Reference docs are loaded on demand — the agent only pulls in the relevant section based on the task at hand, keeping context lean.
+Reference docs are loaded on demand — the agent only pulls in the relevant section based on the task at hand, keeping context lean. Active Skill files are normative; archived OpenSpec artifacts are historical only.
+
+Examples labeled illustrative are intentionally abbreviated. Copyable normative examples state required imports, symbols, return behavior, and compatibility assumptions.
 
 ## Key principles enforced
 
@@ -61,6 +65,8 @@ Reference docs are loaded on demand — the agent only pulls in the relevant sec
 - Message consumers must be designed for idempotency (at-least-once delivery)
 - Every new abstraction must have a stated problem, owner, and testability benefit
 - JSON structured logging for Lambda/CloudWatch; plaintext for local development
+- Boundary exception handling through `exceptions.exception_handler`, with safe codes, envelopes, and transport-specific adapters
+- Terminology: entrypoint is the outer boundary; adapter translates transport data; controller is an HTTP adapter; handler is a runtime or exception-mapping component
 
 ## Security notes
 

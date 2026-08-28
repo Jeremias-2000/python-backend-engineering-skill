@@ -89,6 +89,8 @@ The ORM mapping lives in `infrastructure/database/` and converts between the ORM
 
 Create an abstraction when the application must remain independent from an external capability.
 
+Use `Protocol` when structural typing is sufficient. Use `ABC` with `abstractmethod` when the boundary requires explicit nominal inheritance or shared abstract behavior. Neither form is required without a concrete boundary problem.
+
 ```python
 class PaymentGateway(Protocol):
     async def charge(...): ...
@@ -129,8 +131,11 @@ A Repository is optional. Introduce one when:
 - the abstraction represents an actual domain/application capability
 
 ```python
+from typing import List, Optional
+
+
 class OrderRepository(Protocol):
-    async def get_by_id(self, order_id: str) -> Order | None: ...
+    async def get_by_id(self, order_id: str) -> Optional[Order]: ...
     async def save(self, order: Order) -> None: ...
 ```
 
@@ -172,7 +177,7 @@ Transport models must not leak into the Domain.
 ```python
 class CreateOrderRequest(BaseModel):
     customer_id: UUID
-    items: list[OrderItemRequest]
+    items: List[OrderItemRequest]
 ```
 
 Convert external DTOs into application/domain concepts at the boundary.
@@ -322,10 +327,10 @@ Python async (`async`/`await`) has real costs and real benefits. Do not default 
 ### Decision guide
 
 ```text
-Does the operation perform I/O that would block the event loop
-(network call, database query, file read, external API)?
+Does the selected runtime and driver support async, and is there
+meaningful concurrency within one execution?
 
-YES → async def is appropriate
+YES → consider async def
 NO  → sync def is sufficient; async adds overhead without benefit
 ```
 
@@ -334,7 +339,7 @@ NO  → sync def is sufficient; async adds overhead without benefit
 - FastAPI route handlers that call async repositories or async HTTP clients.
 - Repository adapters backed by async drivers (e.g., `asyncpg`, `aioboto3`, `motor`).
 - Lambda handlers that fan out to multiple I/O operations concurrently (`asyncio.gather`).
-- SQS/EventBridge consumers that perform I/O per message.
+- SQS/EventBridge consumers that perform concurrent I/O per invocation.
 
 ### When sync is sufficient
 
@@ -369,9 +374,9 @@ class CreateOrderUseCase:
         ...
 ```
 
-### pytest-asyncio
+### Async test tooling
 
-Use `pytest-asyncio` for all async tests. Configure it once in `pyproject.toml`:
+When the project uses Pytest, use `pytest-asyncio` for async tests and configure it once in `pyproject.toml`:
 
 ```toml
 [tool.pytest.ini_options]
@@ -395,6 +400,6 @@ These are preferences, not unconditional requirements. Do not add a dependency s
 | **boto3** | AWS service integrations. Must be wrapped behind a port — never called directly from application or domain code. |
 | **Punq** | DI container when the object graph becomes difficult to wire manually, or when multiple entrypoints duplicate composition. Do not introduce it for small applications. |
 | **httpx** | Outbound HTTP calls to external services. Wrap behind a port when the integration must be testable or replaceable. |
-| **Pytest** | All test types. Use `pytest-asyncio` for async code. Always present — no exceptions. |
+| **Pytest** | Recommended for new projects. Existing projects use their configured test runner; use `pytest-asyncio` only when Pytest is selected. |
 | **LocalStack** | Local integration testing against AWS services (SQS, S3, DynamoDB, Lambda). Prefer over mocking the SDK when testing infrastructure adapters. |
 | **Testcontainers** | Integration testing against real databases or other containerized infrastructure. Prefer over in-memory fakes when persistence behavior matters. |
